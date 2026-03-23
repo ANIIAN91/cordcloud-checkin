@@ -2,13 +2,20 @@ name: CordCloud
 
 on:
   schedule:
-    - cron: "0 0 * * *"
+    - cron: "20 2 * * *"
   workflow_dispatch:
 
 jobs:
   checkin:
     runs-on: ubuntu-latest
     steps:
+      - name: Random Delay
+        shell: bash
+        run: |
+          delay=$(( RANDOM % 600 ))
+          echo "sleep ${delay}s"
+          sleep "$delay"
+
       - uses: actions/checkout@v4
       - uses: ./
         with:
