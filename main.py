@@ -7,6 +7,7 @@ from actions_toolkit import core
 from app import log
 from app.action import Action, AuthError, RetryableError
 from app.config import get_or_create_device_fingerprint, load_config
+from app.notify import NotifyError, TelegramNotifier
 
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -39,6 +40,45 @@ def mask_secret(value: str):
         core.set_secret(value)
 
 
+def build_success_message(host: str, message: str, traffic_info: dict | None = None) -> str:
+    lines = [
+        'CordCloud 签到成功',
+        f'时间：{log.now()}',
+        f'站点：{host}',
+        f'结果：{message}',
+    ]
+    if traffic_info:
+        lines.extend([
+            f'今日已用：{traffic_info.get("todayUsedTraffic", "未知")}',
+            f'过去已用：{traffic_info.get("lastUsedTraffic", "未知")}',
+            f'剩余流量：{traffic_info.get("unUsedTraffic", "未知")}',
+        ])
+    return '\n'.join(lines)
+
+
+def build_failure_message(host: str, error_message: str) -> str:
+    lines = [
+        'CordCloud 签到失败',
+        f'时间：{log.now()}',
+    ]
+    if host:
+        lines.append(f'站点：{host}')
+    lines.append(f'错误：{error_message or "未知错误"}')
+    return '\n'.join(lines)
+
+
+def safe_notify(notifier: TelegramNotifier | None, message: str):
+    if notifier is None or not notifier.enabled() or not message:
+        return
+    try:
+        notifier.send(message)
+    except NotifyError as exc:
+        log.warning(f'Telegram 推送失败，错误信息：{exc}')
+
+
+notifier = None
+last_host = ''
+
 try:
     config = load_config()
 
@@ -52,10 +92,18 @@ try:
     trust_device = get_bool_value('trust_device', config, default=False)
     insecure_skip_verify = get_bool_value('insecure_skip_verify', config, default=False)
     device_fingerprint = get_or_create_device_fingerprint(config)
+    telegram_bot_token = get_value('telegram_bot_token', config)
+    telegram_chat_id = get_value('telegram_chat_id', config)
+    notifier = TelegramNotifier(
+        bot_token=telegram_bot_token,
+        chat_id=telegram_chat_id,
+    )
 
     mask_secret(passwd)
     mask_secret(secret)
     mask_secret(code)
+    mask_secret(telegram_bot_token)
+    mask_secret(telegram_chat_id)
     if insecure_skip_verify:
         log.warning('已启用 insecure_skip_verify；这会跳过 TLS 证书校验，仅建议在调试环境中临时使用')
 
@@ -66,6 +114,7 @@ try:
 
     for i, h in enumerate(hosts):
         # 依次尝试每个 host
+        last_host = h
         log.info(f'当前尝试 host：{h}')
         action = Action(
             email,
@@ -113,6 +162,7 @@ try:
                     f'帐号流量使用情况：今日已用 {e["todayUsedTraffic"]}, 过去已用 {e["lastUsedTraffic"]}, 剩余流量 {e["unUsedTraffic"]}')
 
             # 成功运行，退出循环
+            safe_notify(notifier, build_success_message(h, msg, res.get('trafficInfo')))
             log.info(f'CordCloud Action 成功结束运行！')
             success = True
             break
@@ -128,6 +178,8 @@ try:
             log.warning(f'CordCloud Action 运行异常，错误信息：{last_error}')
 
     if not success:
+        safe_notify(notifier, build_failure_message(last_host, last_error))
         log.set_failed(last_error or 'CordCloud Action 运行失败！')
 except Exception as e:
+    safe_notify(notifier, build_failure_message(last_host, str(e)))
     log.set_failed(str(e))

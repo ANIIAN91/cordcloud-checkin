@@ -7,6 +7,7 @@ CordCloud 自动签到项目，支持：
 - GitHub Actions 定时签到
 - Linux 服务器直接用 Python 运行
 - Windows 本地直接运行
+- Telegram 消息推送
 
 ## 改造基础
 
@@ -54,6 +55,8 @@ CordCloud 自动签到项目，支持：
 | `host` | 站点域名，支持多个逗号分隔 | 否 | `cordcloud.one` |
 | `trust_device` | 2FA 成功后是否信任当前设备 | 否 | `false` |
 | `insecure_skip_verify` | 是否跳过 TLS 证书校验，仅调试用 | 否 | `false` |
+| `telegram_bot_token` | Telegram 机器人 Token | 否 | `123456:ABC-DEF...` |
+| `telegram_chat_id` | Telegram 会话 Chat ID | 否 | `123456789` |
 
 默认 `host`：
 
@@ -137,6 +140,38 @@ https://cordcloud.one
 
 如果你不确定，可以直接保留默认值，让程序自动依次尝试。
 
+### 7. `telegram_bot_token`
+
+这是 Telegram 机器人的 Token。
+
+获取方式：
+
+1. 在 Telegram 里打开 `@BotFather`
+2. 发送 `/newbot`
+3. 按提示创建机器人
+4. 复制返回的 Bot Token
+
+### 8. `telegram_chat_id`
+
+这是 Telegram 接收消息的会话 ID。
+
+常见获取方式：
+
+1. 先给你的机器人发一条消息
+2. 打开：
+
+```text
+https://api.telegram.org/bot<你的BotToken>/getUpdates
+```
+
+3. 在返回结果里找到 `chat.id`
+
+说明：
+
+- 私聊通常是正整数
+- 群组通常是负数
+- 如果你把机器人拉进群里，记得先给群里发一条消息，再查 `getUpdates`
+
 ## 配置文件
 
 项目根目录提供了默认模板 [config.default.json](./config.default.json)。
@@ -154,7 +189,9 @@ https://cordcloud.one
   "verify_method": "ga",
   "host": "cordcloud.one",
   "trust_device": "false",
-  "insecure_skip_verify": "false"
+  "insecure_skip_verify": "false",
+  "telegram_bot_token": "",
+  "telegram_chat_id": ""
 }
 ```
 
@@ -169,7 +206,9 @@ https://cordcloud.one
   "verify_method": "email",
   "host": "cordcloud.one",
   "trust_device": "false",
-  "insecure_skip_verify": "false"
+  "insecure_skip_verify": "false",
+  "telegram_bot_token": "",
+  "telegram_chat_id": ""
 }
 ```
 
@@ -200,6 +239,8 @@ https://cordcloud.one
 - `CC_EMAIL`
 - `CC_PASSWD`
 - `CC_SECRET`
+- `TG_BOT_TOKEN`（可选）
+- `TG_CHAT_ID`（可选）
 
 ### Workflow 示例
 
@@ -231,6 +272,8 @@ jobs:
           verify_method: ga
           host: cordcloud.one
           trust_device: false
+          telegram_bot_token: ${{ secrets.TG_BOT_TOKEN }}
+          telegram_chat_id: ${{ secrets.TG_CHAT_ID }}
 ```
 
 如果你把 Action 代码和 workflow 放在同一个仓库里，也可以：
@@ -256,6 +299,8 @@ jobs:
           verify_method: ga
           host: cordcloud.one
           trust_device: false
+          telegram_bot_token: ${{ secrets.TG_BOT_TOKEN }}
+          telegram_chat_id: ${{ secrets.TG_CHAT_ID }}
 ```
 
 注意：
@@ -299,6 +344,8 @@ export INPUT_PASSWD='your-password'
 export INPUT_SECRET='your-totp-secret'
 export INPUT_VERIFY_METHOD='ga'
 export INPUT_HOST='cordcloud.one'
+export INPUT_TELEGRAM_BOT_TOKEN='123456:ABC-DEF'
+export INPUT_TELEGRAM_CHAT_ID='123456789'
 python main.py
 ```
 
@@ -310,6 +357,8 @@ export INPUT_PASSWD='your-password'
 export INPUT_CODE='123456'
 export INPUT_VERIFY_METHOD='email'
 export INPUT_HOST='cordcloud.one'
+export INPUT_TELEGRAM_BOT_TOKEN='123456:ABC-DEF'
+export INPUT_TELEGRAM_CHAT_ID='123456789'
 python main.py
 ```
 
@@ -334,13 +383,13 @@ python main.py
 使用验证器密钥：
 
 ```powershell
-.\local_test.ps1 -Email '你的邮箱' -Passwd '你的密码' -SiteHost 'cordcloud.one' -Secret '你的TOTP密钥' -VerifyMethod 'ga'
+.\local_test.ps1 -Email '你的邮箱' -Passwd '你的密码' -SiteHost 'cordcloud.one' -Secret '你的TOTP密钥' -VerifyMethod 'ga' -TelegramBotToken '123456:ABC-DEF' -TelegramChatId '123456789'
 ```
 
 使用一次性验证码：
 
 ```powershell
-.\local_test.ps1 -Email '你的邮箱' -Passwd '你的密码' -SiteHost 'cordcloud.one' -Code '123456' -VerifyMethod 'email'
+.\local_test.ps1 -Email '你的邮箱' -Passwd '你的密码' -SiteHost 'cordcloud.one' -Code '123456' -VerifyMethod 'email' -TelegramBotToken '123456:ABC-DEF' -TelegramChatId '123456789'
 ```
 
 如果你明确要信任当前本地设备：
@@ -388,3 +437,4 @@ python -m unittest -v test.py
 - GitHub Actions 用 `Secrets`
 - 本地调试用 `config.local.json`
 - `config.local.json` 不提交
+- `telegram_bot_token` 也应放在 `Secrets` 或本地配置里，不要写进公开仓库

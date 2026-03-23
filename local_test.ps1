@@ -5,6 +5,8 @@ param(
     [string]$Secret,
     [string]$Code,
     [string]$VerifyMethod,
+    [string]$TelegramBotToken,
+    [string]$TelegramChatId,
     [switch]$TrustDevice,
     [switch]$InsecureSkipVerify
 )
@@ -15,6 +17,8 @@ $SiteHost = if ($SiteHost) { $SiteHost } else { "" }
 $Secret = if ($Secret) { $Secret } else { "" }
 $Code = if ($Code) { $Code } else { "" }
 $VerifyMethod = if ($VerifyMethod) { $VerifyMethod } else { "" }
+$TelegramBotToken = if ($TelegramBotToken) { $TelegramBotToken } else { "" }
+$TelegramChatId = if ($TelegramChatId) { $TelegramChatId } else { "" }
 
 if ($Email) { $env:INPUT_EMAIL = $Email } else { Remove-Item Env:INPUT_EMAIL -ErrorAction SilentlyContinue }
 if ($Passwd) { $env:INPUT_PASSWD = $Passwd } else { Remove-Item Env:INPUT_PASSWD -ErrorAction SilentlyContinue }
@@ -22,6 +26,8 @@ if ($SiteHost) { $env:INPUT_HOST = $SiteHost } else { Remove-Item Env:INPUT_HOST
 if ($Secret) { $env:INPUT_SECRET = $Secret } else { Remove-Item Env:INPUT_SECRET -ErrorAction SilentlyContinue }
 if ($Code) { $env:INPUT_CODE = $Code } else { Remove-Item Env:INPUT_CODE -ErrorAction SilentlyContinue }
 if ($VerifyMethod) { $env:INPUT_VERIFY_METHOD = $VerifyMethod } else { Remove-Item Env:INPUT_VERIFY_METHOD -ErrorAction SilentlyContinue }
+if ($TelegramBotToken) { $env:INPUT_TELEGRAM_BOT_TOKEN = $TelegramBotToken } else { Remove-Item Env:INPUT_TELEGRAM_BOT_TOKEN -ErrorAction SilentlyContinue }
+if ($TelegramChatId) { $env:INPUT_TELEGRAM_CHAT_ID = $TelegramChatId } else { Remove-Item Env:INPUT_TELEGRAM_CHAT_ID -ErrorAction SilentlyContinue }
 if ($TrustDevice.IsPresent) { $env:INPUT_TRUST_DEVICE = 'true' } else { Remove-Item Env:INPUT_TRUST_DEVICE -ErrorAction SilentlyContinue }
 if ($InsecureSkipVerify.IsPresent) { $env:INPUT_INSECURE_SKIP_VERIFY = 'true' } else { Remove-Item Env:INPUT_INSECURE_SKIP_VERIFY -ErrorAction SilentlyContinue }
 

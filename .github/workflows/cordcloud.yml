@@ -25,3 +25,5 @@ jobs:
           verify_method: ga
           host: cordcloud.one
           trust_device: false
+          telegram_bot_token: ${{ secrets.TG_BOT_TOKEN }}
+          telegram_chat_id: ${{ secrets.TG_CHAT_ID }}

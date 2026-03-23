@@ -8,6 +8,7 @@ import uuid
 
 from app.action import Action
 from app.config import get_or_create_device_fingerprint, load_config
+from app.notify import NotifyError, TelegramNotifier
 
 
 class FakeResponse:
@@ -72,6 +73,8 @@ class ActionTests(unittest.TestCase):
                 'host': 'cordcloud.one',
                 'trust_device': 'false',
                 'insecure_skip_verify': 'false',
+                'telegram_bot_token': '',
+                'telegram_chat_id': '',
                 'device_fingerprint': '',
             }), encoding='utf-8')
             local_path.write_text(json.dumps({
@@ -310,6 +313,28 @@ class ActionTests(unittest.TestCase):
         form_data = post_kwargs['data']
         self.assertEqual(form_data['method'], 'email')
         self.assertEqual(form_data['code'], '654321')
+
+    def test_telegram_notifier_sends_message(self):
+        notifier = TelegramNotifier(bot_token='bot-token', chat_id='123456')
+        response = mock.Mock(status_code=200)
+        response.json.return_value = {'ok': True, 'result': {'message_id': 1}}
+
+        with mock.patch('app.notify.requests.post', return_value=response) as mocked_post:
+            self.assertTrue(notifier.send('签到成功'))
+
+        mocked_post.assert_called_once()
+        _, kwargs = mocked_post.call_args
+        self.assertEqual(kwargs['data']['chat_id'], '123456')
+        self.assertEqual(kwargs['data']['text'], '签到成功')
+
+    def test_telegram_notifier_raises_on_api_error(self):
+        notifier = TelegramNotifier(bot_token='bot-token', chat_id='123456')
+        response = mock.Mock(status_code=400)
+        response.json.return_value = {'ok': False, 'description': 'chat not found'}
+
+        with mock.patch('app.notify.requests.post', return_value=response):
+            with self.assertRaises(NotifyError):
+                notifier.send('签到失败')
 
     def test_check_in_uses_user_csrf_token(self):
         user_html = '''

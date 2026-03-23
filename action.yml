@@ -28,6 +28,12 @@ inputs:
     description: "skip TLS certificate verification for debugging only (default: false)"
     required: false
     default: "false"
+  telegram_bot_token:
+    description: "Telegram bot token for optional notifications"
+    required: false
+  telegram_chat_id:
+    description: "Telegram chat id for optional notifications"
+    required: false
   host:
     description: "base host"
     required: false

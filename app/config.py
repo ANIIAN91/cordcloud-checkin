@@ -12,6 +12,8 @@ DEFAULTS = {
     'host': 'cordcloud.us,cordcloud.one,cordcloud.biz,c-cloud.xyz',
     'trust_device': 'false',
     'insecure_skip_verify': 'false',
+    'telegram_bot_token': '',
+    'telegram_chat_id': '',
     'device_fingerprint': '',
 }
 
