@@ -12,8 +12,22 @@ inputs:
     description: "your cordcloud password"
     required: true
   secret:
-    description: "your 2 step secret"
+    description: "your TOTP secret for authenticator-based 2FA"
     required: false
+  code:
+    description: "your one-time verification code for device/email-based 2FA"
+    required: false
+  verify_method:
+    description: "preferred 2FA method: ga or email (default: auto)"
+    required: false
+  trust_device:
+    description: "trust the current device after successful 2FA (default: false)"
+    required: false
+    default: "false"
+  insecure_skip_verify:
+    description: "skip TLS certificate verification for debugging only (default: false)"
+    required: false
+    default: "false"
   host:
     description: "base host"
     required: false

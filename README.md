@@ -1,55 +1,215 @@
 # CordCloud Action
 
-<a href="./LICENSE"><img src="https://img.shields.io/github/license/yanglbme/cordcloud-action?color=42b883&style=flat-square" alt="license"></a> <a href="../../releases"><img src="https://img.shields.io/github/v/release/yanglbme/cordcloud-action?color=42b883&style=flat-square" alt="release"></a>
+<a href="./LICENSE"><img src="https://img.shields.io/github/license/yanglbme/cordcloud-action?color=42b883&style=flat-square" alt="license"></a>
 
-CordCloud 帐号自动续命。可配置 workflow 的触发条件为 `schedule`，实现每日自动签到，领取流量续命。
+CordCloud 自动签到项目，支持：
 
-欢迎 Star ⭐ 关注[本项目](https://github.com/yanglbme/cordcloud-action)，若有体验上的问题，欢迎提交 issues 反馈给我。你也可以将本项目 Fork
-到你的个人帐号下，进行自定义扩展。
+- GitHub Actions 定时签到
+- Linux 服务器直接用 Python 运行
+- Windows 本地直接运行
 
-## 入参
+## 改造基础
 
-| 参数     | 描述                   | 是否必传 | 默认值                                                   | 示例                      |
-| -------- | ---------------------- | -------- | -------------------------------------------------------- | ------------------------- |
-| `email`  | CordCloud 邮箱         | 是       |                                                          | \${{ secrets.CC_EMAIL }}  |
-| `passwd` | CordCloud 密码         | 是       |                                                          | \${{ secrets.CC_PASSWD }} |
-| `secret` | CordCloud 两步验证密钥 | 否       |                                                          | \${{ secrets.CC_SECRET }} |
-| `host`   | CordCloud 站点         | 否       | cordcloud.us,cordcloud.one,<br>cordcloud.biz,c-cloud.xyz |                           |
+本仓库基于原始项目 [yanglbme/cordcloud-action](https://github.com/yanglbme/cordcloud-action) 改造。
 
-注：
+本次改造的背景是 2026-03-23 实测发现 CordCloud 登录流程已不再兼容原版实现，站点新增了：
 
-- `host` 支持以英文逗号分隔传入多个站点，CordCloud Action 会依次尝试每个站点，成功即停止。若是遇到帐号或密码错误，则不会继续尝试剩余站点。
-- 如果你设置了两步验证，需要将两步验证的密钥传入，否则无法正常签到。
+- `csrf_token`
+- `ALTCHA`
+- `device_fingerprint`
+- 新版“陌生设备二步验证”接口 `/auth/login/2fa/verify`
 
-![](./images/login.png)
+因此当前仓库是在原版基础上，针对新版网页登录流程做的兼容修复。
 
-![](./images/2step_secret.png)
+## 当前支持的登录方式
 
-## 完整示例
+当前代码支持以下两类二步验证：
 
-### 1. 创建 workflow
+- `secret`
+  说明：验证器 APP 的长期密钥，程序可自行生成动态验证码
+  适用：GitHub Actions、服务器定时任务、Windows 本地长期使用
+- `code`
+  说明：邮件验证码或设备验证码，一次性 6 位码
+  适用：本地临时测试
+- `verify_method`
+  说明：显式指定二步验证方式，可选 `ga`、`email` 或留空自动选择
+  适用：账号同时启用了验证器和邮箱验证时，强制选择其中一种
 
-在你的任意一个 GitHub 仓库 `.github/workflows/` 文件夹下创建一个 `.yml` 文件，如 `cc.yml`，内容如下：
+注意：
 
-```yml
-name: CordCloud
+- 如果同时提供 `secret` 和 `code`，可通过 `verify_method` 明确指定使用哪一种
+- 如果未设置 `verify_method`，程序会优先使用 `secret + ga`
+- 如果你想避免站点先打开邮箱验证码页，建议在使用 `secret` 时显式设置 `verify_method=ga`
+- 如果站点启用了“陌生设备验证”，而你又没有 `secret`，则自动化定时签到通常不可持续，只能临时手动输入 `code`
 
-on:
-  schedule:
-    - cron: "0 0 * * *"
-  workflow_dispatch:
+## 参数说明
 
-jobs:
-  checkin:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: yanglbme/cordcloud-action@main
-        with:
-          email: ${{ secrets.CC_EMAIL }}
-          passwd: ${{ secrets.CC_PASSWD }}
+| 参数 | 说明 | 是否必填 | 示例 |
+| --- | --- | --- | --- |
+| `email` | CordCloud 登录邮箱 | 是 | `your@email.com` |
+| `passwd` | CordCloud 登录密码 | 是 | `your-password` |
+| `secret` | 验证器 APP 的 TOTP 密钥 | 否 | `JBSWY3DPEHPK3PXP` |
+| `code` | 邮件/设备二步验证码 | 否 | `123456` |
+| `verify_method` | 指定 2FA 方式：`ga` / `email` / 留空自动 | 否 | `ga` |
+| `host` | 站点域名，支持多个逗号分隔 | 否 | `cordcloud.one` |
+| `trust_device` | 2FA 成功后是否信任当前设备 | 否 | `false` |
+| `insecure_skip_verify` | 是否跳过 TLS 证书校验，仅调试用 | 否 | `false` |
+
+默认 `host`：
+
+```text
+cordcloud.us,cordcloud.one,cordcloud.biz,c-cloud.xyz
 ```
 
-如果你设置了两步验证，需要将两步验证的密钥传入，否则无法完成登录签到。示例如下：
+## 各参数如何获取
+
+### 1. `email`
+
+就是你的 CordCloud 登录邮箱。
+
+### 2. `passwd`
+
+就是你的 CordCloud 登录密码。
+
+### 3. `secret`
+
+`secret` 不是 6 位动态验证码，而是验证器绑定时生成的“长期密钥”。
+
+常见获取方式：
+
+1. 登录 CordCloud 后台
+2. 进入账号安全 / 两步验证 / 验证器设置页面
+3. 找到验证器 APP 绑定信息
+4. 页面通常会显示二维码，或一条 `otpauth://...` 链接
+5. 从中提取 `secret=...` 后面的值
+
+例如：
+
+```text
+otpauth://totp/CordCloud:xxx?secret=JBSWY3DPEHPK3PXP&issuer=CordCloud
+```
+
+真正要填的是：
+
+```text
+JBSWY3DPEHPK3PXP
+```
+
+不是整条 `otpauth://...`，只要 `secret=` 后面的那一段。
+
+### 4. `code`
+
+`code` 是你当前这一次登录收到的 6 位验证码，可能来自：
+
+- 邮箱验证码
+- 设备验证验证码
+
+这个值是一次性的，会过期，不适合放到 GitHub Actions 做长期定时任务。
+
+### 5. `verify_method`
+
+可选值：
+
+- `ga`：强制使用验证器 APP
+- `email`：强制使用邮箱验证码
+- 留空：自动选择
+
+推荐：
+
+- 你已经配置了 `secret`，并且账号同时支持邮箱验证和验证器验证时，设置为 `ga`
+- 你只拿到了当次邮件验证码时，设置为 `email`
+
+### 6. `host`
+
+就是你实际登录使用的站点域名，不要带协议头。
+
+正确示例：
+
+```text
+cordcloud.one
+```
+
+错误示例：
+
+```text
+https://cordcloud.one
+```
+
+如果你不确定，可以直接保留默认值，让程序自动依次尝试。
+
+## 配置文件
+
+项目根目录提供了默认模板 [config.default.json](./config.default.json)。
+
+本地使用时，建议复制一份为 `config.local.json`，该文件已加入 `.gitignore`，不会提交到仓库。
+
+示例：
+
+```json
+{
+  "email": "your@email.com",
+  "passwd": "your-password",
+  "secret": "JBSWY3DPEHPK3PXP",
+  "code": "",
+  "verify_method": "ga",
+  "host": "cordcloud.one",
+  "trust_device": "false",
+  "insecure_skip_verify": "false"
+}
+```
+
+如果你当前没有验证器密钥，只想临时本地测试：
+
+```json
+{
+  "email": "your@email.com",
+  "passwd": "your-password",
+  "secret": "",
+  "code": "123456",
+  "verify_method": "email",
+  "host": "cordcloud.one",
+  "trust_device": "false",
+  "insecure_skip_verify": "false"
+}
+```
+
+参数读取优先级：
+
+1. Action 输入 / 环境变量 `INPUT_*`
+2. `config.local.json`
+3. `config.default.json`
+
+## GitHub Actions 使用方法
+
+### 推荐方式
+
+推荐只在 GitHub Actions 中使用 `secret`，不要依赖 `code`。
+
+原因：
+
+- `secret` 可以长期稳定自动生成动态验证码
+- `code` 是临时验证码，过期后就失效，不适合定时任务
+- 如果账号同时支持邮箱和验证器，建议显式设置 `verify_method: ga`
+- `trust_device` 默认应保持 `false`
+- `insecure_skip_verify` 默认应保持 `false`
+
+### 先配置 GitHub Secrets
+
+在你的 GitHub 仓库中配置：
+
+- `CC_EMAIL`
+- `CC_PASSWD`
+- `CC_SECRET`
+
+### Workflow 示例
+
+如果你已经把本项目推送到你自己的 GitHub 仓库，例如：
+
+```text
+yourname/cordcloud-action
+```
+
+则可以这样用：
 
 ```yml
 name: CordCloud
@@ -63,59 +223,168 @@ jobs:
   checkin:
     runs-on: ubuntu-latest
     steps:
-      - uses: yanglbme/cordcloud-action@main
+      - uses: yourname/cordcloud-action@main
         with:
           email: ${{ secrets.CC_EMAIL }}
           passwd: ${{ secrets.CC_PASSWD }}
           secret: ${{ secrets.CC_SECRET }}
+          verify_method: ga
+          host: cordcloud.one
+          trust_device: false
 ```
 
-注意：`cron` 是 UTC 时间，使用时请将北京时间转换为 UTC 进行配置。由于 GitHub Actions 的限制，如果将 `cron` 表达式设置为 `* * * * *`，则实际的执行频率为每 5 分钟执行一次。
+如果你把 Action 代码和 workflow 放在同一个仓库里，也可以：
+
+```yml
+name: CordCloud
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+jobs:
+  checkin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./
+        with:
+          email: ${{ secrets.CC_EMAIL }}
+          passwd: ${{ secrets.CC_PASSWD }}
+          secret: ${{ secrets.CC_SECRET }}
+          verify_method: ga
+          host: cordcloud.one
+          trust_device: false
+```
+
+注意：
+
+- `cron` 使用 UTC 时间
+- 如果你的账号只支持邮件验证码 `code`，则 GitHub Actions 不适合做真正的长期自动签到
+- 不建议在 GitHub Actions 中启用 `trust_device`
+- 不建议在 GitHub Actions 中启用 `insecure_skip_verify`
+
+## Linux 服务器 Python 使用方法
+
+### 1. 准备环境
 
 ```bash
-┌───────────── 分钟 (0 - 59)
-│ ┌───────────── 小时 (0 - 23)
-│ │ ┌───────────── 日 (1 - 31)
-│ │ │ ┌───────────── 月 (1 - 12 或 JAN-DEC)
-│ │ │ │ ┌───────────── 星期 (0 - 6 或 SUN-SAT)
-│ │ │ │ │
-│ │ │ │ │
-│ │ │ │ │
-* * * * *
+git clone <your-repo-url>
+cd cordcloud-action
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-实际上，一般情况下，你只需要跟示例一样，将 `cron` 表达式设置为**每天定时运行一次**即可。如果担心 CordCloud 官网某次恰好发生故障而无法完成自动签到，可以将 `cron` 表达式设置为一天运行 2 次或者更多次。
-
-### 2. 配置 secrets 参数
-
-在 GitHub 仓库的 `Settings -> Secrets` 路径下配置好 `CC_EMAIL` 与 `CC_PASSWD` ，不要直接在 `.yml` 文件中暴露个人帐号密码以及密钥等敏感信息。
-
-如果你设置了两步验证，注意还需要配置 `CC_SECRET` 参数。
-
-![](./images/add_secrets.png)
-
-### 3. 每日运行结果
-
-若 CordCloud Action 所需参数 `email`、`passwd` 等配置无误，CordCloud Action 将会根据触发条件（比如 `schedule`）自动运行，结果如下：
-
-![](./images/res.png)
+### 2. 配置 `config.local.json`
 
 ```bash
-Run yanglbme/cordcloud-action@main
-  with:
-    email: ***
-    passwd: ***
-    secret: ***
-    host: cordcloud.us,cordcloud.one,cordcloud.biz,c-cloud.xyz
-/usr/bin/docker run --name bedb45d362fa3d3b44c97b19a4a9aff834955_0c4091 --label 5bedb4 --workdir /github/workspace --rm -e "INPUT_EMAIL" -e "INPUT_PASSWD" -e "INPUT_SECRET" -e "INPUT_HOST" -e "HOME" -e "GITHUB_JOB" -e "GITHUB_REF" -e "GITHUB_SHA" -e "GITHUB_REPOSITORY" -e "GITHUB_REPOSITORY_OWNER" -e "GITHUB_REPOSITORY_OWNER_ID" -e "GITHUB_RUN_ID" -e "GITHUB_RUN_NUMBER" -e "GITHUB_RETENTION_DAYS" -e "GITHUB_RUN_ATTEMPT" -e "GITHUB_REPOSITORY_ID" -e "GITHUB_ACTOR_ID" -e "GITHUB_ACTOR" -e "GITHUB_TRIGGERING_ACTOR" -e "GITHUB_WORKFLOW" -e "GITHUB_HEAD_REF" -e "GITHUB_BASE_REF" -e "GITHUB_EVENT_NAME" -e "GITHUB_SERVER_URL" -e "GITHUB_API_URL" -e "GITHUB_GRAPHQL_URL" -e "GITHUB_REF_NAME" -e "GITHUB_REF_PROTECTED" -e "GITHUB_REF_TYPE" -e "GITHUB_WORKFLOW_REF" -e "GITHUB_WORKFLOW_SHA" -e "GITHUB_WORKSPACE" -e "GITHUB_ACTION" -e "GITHUB_EVENT_PATH" -e "GITHUB_ACTION_REPOSITORY" -e "GITHUB_ACTION_REF" -e "GITHUB_PATH" -e "GITHUB_ENV" -e "GITHUB_STEP_SUMMARY" -e "GITHUB_STATE" -e "GITHUB_OUTPUT" -e "RUNNER_OS" -e "RUNNER_ARCH" -e "RUNNER_NAME" -e "RUNNER_ENVIRONMENT" -e "RUNNER_TOOL_CACHE" -e "RUNNER_TEMP" -e "RUNNER_WORKSPACE" -e "ACTIONS_RUNTIME_URL" -e "ACTIONS_RUNTIME_TOKEN" -e "ACTIONS_CACHE_URL" -e GITHUB_ACTIONS=true -e CI=true -v "/var/run/docker.sock":"/var/run/docker.sock" -v "/home/runner/work/_temp/_github_home":"/github/home" -v "/home/runner/work/_temp/_github_workflow":"/github/workflow" -v "/home/runner/work/_temp/_runner_file_commands":"/github/file_commands" -v "/home/runner/work/reading/reading":"/github/workspace" 5bedb4:5d362fa3d3b44c97b19a4a9aff834955
-[2023-08-10 10:20:33] 欢迎使用 CordCloud Action ❤
-
-📕 入门指南: https://github.com/marketplace/actions/cordcloud-action
-📣 由 Yang Libin 维护: https://github.com/yanglbme
-
-[2023-08-10 10:20:33] 当前尝试 host：cordcloud.us
-[2023-08-10 10:20:33] 尝试帐号登录，结果：登录成功
-[2023-08-10 10:20:33] 尝试帐号签到，结果：您似乎已经签到过了...
-[2023-08-10 10:20:34] 帐号流量使用情况：今日已用 121.22MB, 过去已用 162.02GB, 剩余流量 688.62GB
-[2023-08-10 10:20:34] CordCloud Action 成功结束运行！
+cp config.default.json config.local.json
 ```
+
+然后填写你的账号信息。
+
+### 3. 运行
+
+```bash
+python main.py
+```
+
+### 4. 也可以直接用环境变量运行
+
+```bash
+export INPUT_EMAIL='your@email.com'
+export INPUT_PASSWD='your-password'
+export INPUT_SECRET='your-totp-secret'
+export INPUT_VERIFY_METHOD='ga'
+export INPUT_HOST='cordcloud.one'
+python main.py
+```
+
+如果你只想临时测试邮件验证码：
+
+```bash
+export INPUT_EMAIL='your@email.com'
+export INPUT_PASSWD='your-password'
+export INPUT_CODE='123456'
+export INPUT_VERIFY_METHOD='email'
+export INPUT_HOST='cordcloud.one'
+python main.py
+```
+
+### 5. 定时运行
+
+推荐在 Linux 服务器上配合 `crontab` 使用，并优先采用 `secret`。
+
+## Windows 使用方法
+
+### 方式一：直接使用本项目提供的本地脚本
+
+项目中已提供 [local_test.ps1](./local_test.ps1)。
+
+如果你已经配置好 `config.local.json`，直接运行：
+
+```powershell
+.\local_test.ps1
+```
+
+### 方式二：命令行传参
+
+使用验证器密钥：
+
+```powershell
+.\local_test.ps1 -Email '你的邮箱' -Passwd '你的密码' -SiteHost 'cordcloud.one' -Secret '你的TOTP密钥' -VerifyMethod 'ga'
+```
+
+使用一次性验证码：
+
+```powershell
+.\local_test.ps1 -Email '你的邮箱' -Passwd '你的密码' -SiteHost 'cordcloud.one' -Code '123456' -VerifyMethod 'email'
+```
+
+如果你明确要信任当前本地设备：
+
+```powershell
+.\local_test.ps1 -TrustDevice
+```
+
+### 方式三：自己创建 Python/Conda 环境
+
+```powershell
+conda create -n cordcloud python=3.10 -y
+conda activate cordcloud
+pip install -r requirements.txt
+copy config.default.json config.local.json
+python .\main.py
+```
+
+## 常见问题
+## 为什么原版项目现在不能用了
+
+因为 CordCloud 的登录链路已经变化，新增了：
+
+- `csrf_token`
+- `ALTCHA`
+- `device_fingerprint`
+- 新版二步验证接口
+
+原版项目仍按旧接口直接提交邮箱和密码，所以会失败。
+
+## 本地调试验证
+
+当前仓库已加入基础回归测试，可运行：
+
+```bash
+python -m unittest -v test.py
+```
+
+## 声明
+
+请不要把真实账号、密码、`secret`、邮件验证码直接提交到仓库。
+
+推荐做法：
+
+- GitHub Actions 用 `Secrets`
+- 本地调试用 `config.local.json`
+- `config.local.json` 不提交

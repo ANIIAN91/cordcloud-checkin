@@ -1,0 +1,11 @@
+{
+  "email": "",
+  "passwd": "",
+  "secret": "",
+  "code": "",
+  "verify_method": "",
+  "host": "cordcloud.us,cordcloud.one,cordcloud.biz,c-cloud.xyz",
+  "trust_device": "false",
+  "insecure_skip_verify": "false",
+  "device_fingerprint": ""
+}
