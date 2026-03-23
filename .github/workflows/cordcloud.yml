@@ -1,0 +1,20 @@
+name: CordCloud
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+jobs:
+  checkin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./
+        with:
+          email: ${{ secrets.CC_EMAIL }}
+          passwd: ${{ secrets.CC_PASSWD }}
+          secret: ${{ secrets.CC_SECRET }}
+          verify_method: ga
+          host: cordcloud.one
+          trust_device: false
