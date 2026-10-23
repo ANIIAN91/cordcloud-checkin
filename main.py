@@ -1,3 +1,4 @@
+import argparse
 import os
 from pathlib import Path
 import sys
@@ -71,7 +72,8 @@ def safe_notify(notifier: TelegramNotifier | None, message: str):
     if notifier is None or not notifier.enabled() or not message:
         return
     try:
-        notifier.send(message)
+        if notifier.send(message):
+            log.info('Telegram 推送成功')
     except NotifyError as exc:
         log.warning(f'Telegram 推送失败，错误信息：{exc}')
 
@@ -80,15 +82,19 @@ notifier = None
 last_host = ''
 
 try:
+    parser = argparse.ArgumentParser(description='CordCloud 自动签到')
+    parser.add_argument('--browser', action='store_true', help='复用本机浏览器中已登录的账号会话')
+    parser.add_argument('--host', help='仅使用指定站点，例如 cordcloud.biz')
+    args = parser.parse_args()
     config = load_config()
 
     # 获取输入
-    email = get_value('email', config, required=True)
-    passwd = get_value('passwd', config, required=True)
+    email = get_value('email', config, required=not args.browser)
+    passwd = get_value('passwd', config, required=not args.browser)
     secret = get_value('secret', config)
     code = get_value('code', config)
     verify_method = get_value('verify_method', config)
-    host = get_value('host', config, default='cordcloud.us,cordcloud.one,cordcloud.biz,c-cloud.xyz')
+    host = args.host or get_value('host', config, default='cordcloud.us,cordcloud.one,cordcloud.biz,c-cloud.xyz')
     trust_device = get_bool_value('trust_device', config, default=False)
     insecure_skip_verify = get_bool_value('insecure_skip_verify', config, default=False)
     device_fingerprint = get_or_create_device_fingerprint(config)
@@ -126,6 +132,7 @@ try:
             trust_device=trust_device,
             verify_tls=not insecure_skip_verify,
             device_fingerprint=device_fingerprint,
+            browser_login=args.browser,
         )
         try:
             # 登录

@@ -5,11 +5,20 @@ on:
     - cron: "20 2 * * *"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: cordcloud-checkin
+  cancel-in-progress: false
+
 jobs:
   checkin:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Random Delay
+        if: github.event_name == 'schedule'
         shell: bash
         run: |
           delay=$(( RANDOM % 600 ))
@@ -17,13 +26,24 @@ jobs:
           sleep "$delay"
 
       - uses: actions/checkout@v4
-      - uses: ./
+      - uses: actions/setup-python@v6
         with:
-          email: ${{ secrets.CC_EMAIL }}
-          passwd: ${{ secrets.CC_PASSWD }}
-          secret: ${{ secrets.CC_SECRET }}
-          verify_method: ga
-          host: cordcloud.one
-          trust_device: false
-          telegram_bot_token: ${{ secrets.TG_BOT_TOKEN }}
-          telegram_chat_id: ${{ secrets.TG_CHAT_ID }}
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          python -m playwright install --with-deps --no-shell chromium
+      - name: Regression tests
+        run: python -m unittest -v test.py
+      - name: Check in with fresh headless login
+        env:
+          INPUT_EMAIL: ${{ secrets.CC_EMAIL }}
+          INPUT_PASSWD: ${{ secrets.CC_PASSWD }}
+          INPUT_SECRET: ${{ secrets.CC_SECRET }}
+          INPUT_VERIFY_METHOD: ga
+          INPUT_HOST: cordcloud.biz
+          INPUT_TRUST_DEVICE: 'false'
+          INPUT_TELEGRAM_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          INPUT_TELEGRAM_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: python main.py

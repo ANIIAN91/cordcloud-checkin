@@ -45,6 +45,7 @@ class Action:
         trust_device: bool = False,
         verify_tls: bool = True,
         device_fingerprint: str = '',
+        browser_login: bool = False,
     ):
         self.email = email
         self.passwd = passwd
@@ -57,6 +58,7 @@ class Action:
         self.trust_device = trust_device
         self.verify_tls = verify_tls
         self.device_fingerprint = device_fingerprint or self._build_device_fingerprint()
+        self.browser_login = browser_login
         self.session.headers.update({
             'User-Agent': (
                 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
@@ -307,19 +309,58 @@ class Action:
 
     def _get_user_page(self):
         response = self._get('user', referer=self.format_url('auth/login'))
+        if response.status_code >= 400:
+            raise RetryableError(f'读取账号页面失败（HTTP {response.status_code}）')
         path = urlparse(response.url).path
-        if '/auth/login' in path or 'id="login-form"' in response.text:
+        if (path.rstrip('/') != '/user' or
+                re.search(r'id\s*=\s*[\'"]login-form[\'"]', response.text, re.I)):
             raise RetryableError('当前会话未登录，站点返回了登录页')
         return response
 
     def login(self) -> dict:
+        if self.browser_login:
+            from app.browser import BrowserError, load_session
+
+            try:
+                user_agent, cookies = load_session(self.format_url('user'))
+            except BrowserError as exc:
+                raise AuthError(str(exc)) from exc
+            for cookie in cookies:
+                self.session.cookies.set(
+                    cookie['name'], cookie['value'], domain=cookie['domain'],
+                    path=cookie.get('path', '/'), secure=cookie.get('secure', True),
+                )
+            self.session.headers['User-Agent'] = user_agent
+            self._get_user_page()  # Verify the imported session before reporting success.
+            return {'ret': 1, 'msg': '已复用浏览器登录状态'}
         login_page = self._get('auth/login')
         overrides = {
             'email': self.email,
             'passwd': self.passwd,
             'device_fingerprint': self.device_fingerprint,
         }
-        result = self._submit_form(login_page, login_page.text, overrides=overrides)
+        if re.search(r'<cap-widget\b', login_page.text, re.I):
+            from app.headless import HeadlessError, prepare_login
+
+            try:
+                data, cookies = prepare_login(self.format_url('auth/login'), verify_tls=self.verify_tls)
+            except HeadlessError as exc:
+                raise RetryableError(str(exc)) from exc
+            # Submit the token with the browser's own session, UA and fingerprint.
+            self.session.cookies.clear()
+            for cookie in cookies:
+                self.session.cookies.set(
+                    cookie['name'], cookie['value'], domain=cookie['domain'],
+                    path=cookie.get('path', '/'), secure=cookie.get('secure', True),
+                )
+            self.session.headers['User-Agent'] = data['user_agent']
+            overrides.update({key: data[key] for key in (
+                'cap_token', 'csrf_token', 'device_fingerprint',
+            )})
+            response = self._post('auth/login', overrides, referer=login_page.url)
+            result = self._decode_json(response, '登录')
+        else:
+            result = self._submit_form(login_page, login_page.text, overrides=overrides)
         if self._needs_device_2fa(result):
             return self._device_2fa(result)
         return result

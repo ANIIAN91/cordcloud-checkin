@@ -1,22 +1,13 @@
-FROM python:3.10.20-slim AS builder
-
-ENV VIRTUAL_ENV=/opt/venv
-RUN python3 -m venv $VIRTUAL_ENV
-ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+FROM python:3.12-slim
 
 WORKDIR /app
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
-COPY requirements.txt /tmp/requirements.txt
-RUN python3 -m pip install --upgrade pip
-RUN pip install --no-cache-dir --target=/app -r /tmp/requirements.txt
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+    && python -m playwright install --with-deps --no-shell chromium \
+    && rm -rf /var/lib/apt/lists/*
 
-COPY main.py /app/main.py
-COPY action.yml /app/action.yml
-COPY config.default.json /app/config.default.json
+COPY main.py action.yml config.default.json /app/
 COPY app /app/app
-
-FROM gcr.io/distroless/python3
-COPY --from=builder /app /app
-WORKDIR /app
-ENV PYTHONPATH /app
-CMD ["/app/main.py"]
+CMD ["python", "/app/main.py"]

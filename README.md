@@ -1,5 +1,51 @@
 # CordCloud Action
 
+## 无人值守签到（2026-10-23 验证）
+
+默认运行会检测登录页的验证方式：旧页面使用 ALTCHA；新版 Cap 页面会启动一个
+全新的无头 Chromium，完成网页原有验证，再用该会话提交账号密码和 TOTP 二步验证码。
+不依赖已登录的桌面浏览器、浏览器扩展或人工输入验证码，不保存登录 Cookie。
+无人值守运行需配置 `email`、`passwd`、`secret`，建议 `verify_method=ga`。
+
+本机环境已配置，可直接运行：
+
+```bash
+.venv/bin/python main.py --host cordcloud.biz
+```
+
+其他 Linux 机器先在虚拟环境中安装依赖和浏览器：
+
+```bash
+pip install -r requirements.txt
+python -m playwright install --with-deps --no-shell chromium
+python main.py --host cordcloud.biz
+```
+
+`--with-deps` 在 Linux 上安装浏览器系统依赖，可能需要 sudo。
+Windows 使用 `python -m playwright install --no-shell chromium`。
+项目旧 `.conda/cordcloud-test` 是 Windows 环境，不能直接用于 Linux。
+
+项目工作流会安装 Python 3.12、项目依赖和 Chromium，执行回归测试后运行 `python main.py`。
+原有定时为 UTC 02:20（北京时间 10:20），另有 0～10 分钟随机延迟；手动触发跳过随机延迟。
+若 GitHub 显示 `disabled_inactivity`，需重新启用工作流；上传代码本身不等于云端运行验证通过。
+本次本机实测：全新无头会话登录及二步验证成功，签到返回“您似乎已经签到过了”。
+
+浏览器安装方式依据 [Playwright 官方浏览器文档](https://playwright.dev/python/docs/browsers#chromium-new-headless-mode)，
+CI 安装依据 [Playwright 官方 CI 文档](https://playwright.dev/python/docs/ci#github-actions)。
+站点验证流程仍可能变化；验证失败或超时会报告失败，不视为已签到。
+
+### 可选：复用已登录的桌面浏览器
+
+保持 `agent-browser-cli` 扩展连接，并打开已登录的 `https://cordcloud.biz/user`：
+
+```bash
+.venv/bin/python main.py --browser --host cordcloud.biz
+```
+
+`--browser` 使用浏览器当前账号，不用配置文件的邮箱密码登录；仅在内存中复用指定站点的
+Cookie。会话过期后需重新登录。GitHub Actions 使用上面的默认无头模式。
+`--host` 优先于配置文件和环境变量。
+
 <a href="./LICENSE"><img src="https://img.shields.io/github/license/yanglbme/cordcloud-action?color=42b883&style=flat-square" alt="license"></a>
 
 CordCloud 自动签到项目，支持：
@@ -320,6 +366,7 @@ cd cordcloud-action
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+python -m playwright install --with-deps --no-shell chromium
 ```
 
 ### 2. 配置 `config.local.json`
@@ -404,6 +451,7 @@ python main.py
 conda create -n cordcloud python=3.10 -y
 conda activate cordcloud
 pip install -r requirements.txt
+python -m playwright install --no-shell chromium
 copy config.default.json config.local.json
 python .\main.py
 ```
