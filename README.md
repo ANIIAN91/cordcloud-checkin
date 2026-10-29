@@ -1,506 +1,194 @@
-# CordCloud Action
+# CordCloud 自动签到
 
-## 无人值守签到
+通过 GitHub Actions 每天为 CordCloud 账号自动签到，支持验证器 TOTP 二步验证及可选的 Telegram 结果通知。适合希望保留云端无人值守签到的用户。
 
-默认运行会检测登录页的验证方式：旧页面使用 ALTCHA；新版 Cap 页面使用
-Patchright 1.64.3 + Google Chrome 有界面模式，Linux 云端通过 Xvfb 提供虚拟显示。
-每次使用全新临时浏览器配置，取得验证字段及 Cookie 后关闭浏览器并删除临时配置。
-随后在内存中把该会话的 Cookie、UA、Cap 令牌、CSRF 和设备指纹交给登录请求，
-完成账号密码登录、TOTP 二步验证和签到。不依赖已登录的个人浏览器或手动验证码。
+首次使用请先完成下方的 GitHub 配置，再手动运行一次。本仓库当前默认使用 **Patchright + Google Chrome + Xvfb** 完成 Cap 验证。
 
-需配置 `email`、`passwd`、`secret`，建议 `verify_method=ga`。
+2026-10-29 的[完整云端验证](https://github.com/ANIIAN91/cordcloud-checkin/actions/runs/40796343093)已完成登录、签到并获得 171 MB 流量，Telegram 通知发送成功。这是一次实测结果，不代表后续每次都能通过站点验证。
 
-安装项目依赖和 Google Chrome（已安装 Chrome 时无需重复安装）：
+## GitHub Actions 快速开始
+
+### 1. 准备账号和仓库
+
+Fork 本仓库，并在自己的仓库中启用 Actions。当前定时工作流使用 `cordcloud.biz` 和验证器二步验证，需要账号邮箱、密码及验证器的 TOTP 长期密钥。
+
+`secret` 是绑定验证器时取得的长期密钥，不是每隔一段时间变化的六位验证码。若拿到的是 `otpauth://` 链接，应填写其中 `secret` 参数的值。仅有一次性邮件验证码的账号不能直接使用当前无人值守配置。
+
+### 2. 添加仓库 Secrets
+
+进入仓库的 **Settings → Secrets and variables → Actions → New repository secret**，添加：
+
+| Secret | 内容 | 用途 |
+| --- | --- | --- |
+| `CC_EMAIL` | CordCloud 登录邮箱 | 必填 |
+| `CC_PASSWD` | CordCloud 登录密码 | 必填 |
+| `CC_SECRET` | 验证器 TOTP 长期密钥 | 当前工作流必填 |
+| `TG_BOT_TOKEN` | Telegram Bot Token | 可选，通知需与下一项一起配置 |
+| `TG_CHAT_ID` | Telegram 目标会话 ID | 可选 |
+
+Telegram Bot Token 可通过 BotFather 创建机器人取得。先向机器人发送消息，再通过 Telegram 的 `getUpdates` 接口读取目标 `chat.id`；群组还需先加入机器人。不要把这些值写进工作流或提交到仓库。
+
+### 3. 手动验证一次
+
+打开 **Actions → CordCloud → Run workflow**，选择 `main` 并运行。
+
+成功日志应包含“尝试帐号登录，结果：验证成功”或其他站点登录成功消息，以及“尝试帐号签到，结果：获得了…流量”或“您似乎已经签到过了”。最终应显示 `CordCloud Action 成功结束运行！`。
+
+Telegram 推送失败会产生警告，但不会把已经完成的签到改判为失败。请以签到步骤和工作流最终状态为准。
+
+### 4. 每日自动运行
+
+唯一的定时配置入口是 [.github/workflows/cordcloud.yml](.github/workflows/cordcloud.yml)：
+
+- 计划时间：每天 UTC `02:20`，即北京时间 `10:20`。
+- 定时触发后额外随机等待 0～599 秒；手动运行跳过该等待。
+- 使用 Ubuntu 24.04、Python 3.12，以及托管 runner 已安装的 Chrome 和 Xvfb。
+- 先执行回归测试，再运行 `xvfb-run -a python -u main.py`。
+- 当前仅尝试 `cordcloud.biz`，使用 `verify_method=ga`，不启用信任设备。
+
+计划时间不等于实际开始时间。若工作流被停用，需先重新启用；更改时间或站点请修改上述文件，避免另外创建重复的每日任务。
+
+## 本地运行
+
+### Linux
+
+使用 Python 3.12、Google Chrome，以及独立 Python 虚拟环境。以下从源码运行，不需要另外部署服务：
 
 ```bash
-pip install -r requirements.txt
-python -m patchright install chrome
+git clone https://github.com/ANIIAN91/cordcloud-checkin.git
+cd cordcloud-checkin
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+cp config.default.json config.local.json
 ```
 
-Linux 无桌面环境还需安装 `xvfb` 和 `xauth`，然后运行：
+编辑 `config.local.json`，填写 `email`、`passwd`、`secret`，将 `verify_method` 设为 `ga`、`host` 设为 `cordcloud.biz`。已有配置时直接编辑，勿重新复制模板覆盖。
+
+若系统尚未安装 Google Chrome，可使用 Patchright 安装入口；可能需要管理员权限：
 
 ```bash
-xvfb-run -a python main.py --host cordcloud.biz
+.venv/bin/python -m patchright install chrome
 ```
 
-有桌面显示的本机和 Windows 可直接运行 `python main.py --host cordcloud.biz`。
-Chrome 安装可能需要管理员权限。项目旧 `.conda/cordcloud-test` 是 Windows 环境，不能直接用于 Linux。
-原有本机 `.venv` 需要更新依赖后才能运行新版本；独立探针环境不自动替代它。
+无桌面的 Ubuntu/Debian 服务器还需虚拟显示：
 
-GitHub 工作流使用 Ubuntu 24.04、Python 3.12 和托管 runner 已有的 Google Chrome/Xvfb，
-先执行回归测试，再执行完整签到。Docker Action 同样安装 Chrome/Xvfb 并通过虚拟显示运行。
-定时为 UTC 02:20（北京时间 10:20），另有 0～10 分钟随机延迟；手动触发跳过随机延迟。
-若 GitHub 显示 `disabled_inactivity`，需重新启用工作流；上传代码本身不等于云端验证通过。
+```bash
+sudo apt-get update
+sudo apt-get install -y xvfb xauth
+xvfb-run -a .venv/bin/python main.py --host cordcloud.biz
+```
 
-配置依据：[Patchright Python 官方说明](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright-python)。
-此前独立探针已在本机取得 1 次、云端取得 3 次 Cap 令牌，
-[探针运行记录](https://github.com/ANIIAN91/cordcloud-checkin/actions/runs/40795157310)仅证明该阶段通过；
-完整登录、二步验证和签到结果以对应 Actions 日志为准。站点验证流程仍可能变化。
+已有桌面显示时可直接运行：
 
-### Cap 验证诊断日志
+```bash
+.venv/bin/python main.py --host cordcloud.biz
+```
 
-`Cap diagnostic` 记录浏览器启动、登录页加载、等待验证、读取会话各阶段及总耗时，
-包括 Chrome 版本、登录页 HTTP 状态和必要字段是否就绪（仅布尔值）。
-浏览器在主执行环境读取组件属性及页面变量，字段值只在内存传递，不进入日志。
+升级已有项目时，应重新安装 `requirements.txt` 中的依赖；旧版仅安装 Playwright 的环境不能直接运行新版本。
 
-Patchright 不提供控制台事件，诊断改为匹配页面组件声明的验证 API，记录
-`challenge` / `redeem` 的 HTTP 状态。错误响应仅保留已知公开错误码，未知内容显示
-`redacted_unknown`；不再仅凭失败就推断为 `automated_browser`。
-`Cap session` 记录会话已导入和登录请求的 HTTP 状态，HTTP 200 本身不代表登录成功。
+### Windows
 
-这些诊断不输出响应正文、URL、账号、Cookie、令牌、指纹值或浏览器异常原文。
-失败、异常跳转、字段缺失及超时仍会报告失败，不添加自动重试，不视为已签到。
+安装 Python 3.12 和 Google Chrome 后，可在 PowerShell 中使用项目虚拟环境：
 
-### 可选：复用已登录的桌面浏览器
+```powershell
+git clone https://github.com/ANIIAN91/cordcloud-checkin.git
+cd cordcloud-checkin
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+Copy-Item config.default.json config.local.json
+```
 
-保持 `agent-browser-cli` 扩展连接，并打开已登录的 `https://cordcloud.biz/user`：
+按 Linux 一节说明填写配置后运行：
+
+```powershell
+.\.venv\Scripts\python.exe main.py --host cordcloud.biz
+```
+
+本轮完整验证在 Linux/GitHub Actions 上完成，Windows 命令未重新实测。旧 [local_test.ps1](local_test.ps1) 内含特定机器的绝对路径，不能作为通用启动入口；旧 `.conda/cordcloud-test` 也不能用于 Linux。
+
+### 可选：复用本机浏览器登录状态
+
+如果已配置 `agent-browser-cli` 并保持浏览器扩展连接，先在浏览器中登录并打开 `https://cordcloud.biz/user`，再运行：
 
 ```bash
 .venv/bin/python main.py --browser --host cordcloud.biz
 ```
 
-`--browser` 使用浏览器当前账号，不用配置文件的邮箱密码登录；仅在内存中复用指定站点的
-Cookie。会话过期后需重新登录。GitHub Actions 使用上面的 Patchright + Chrome + Xvfb 流程。
-`--host` 优先于配置文件和环境变量。
+该模式使用浏览器当前账号，在内存中导入本站 Cookie，不使用配置中的邮箱密码重新登录。会话过期后需要手动登录。GitHub 定时任务使用自动登录流程，不依赖此模式。
 
-<a href="./LICENSE"><img src="https://img.shields.io/github/license/yanglbme/cordcloud-action?color=42b883&style=flat-square" alt="license"></a>
+## 配置说明
 
-CordCloud 自动签到项目，支持：
+[config.default.json](config.default.json) 是空值模板，本地账号信息放在已被 Git 忽略的 `config.local.json` 中。
 
-- GitHub Actions 定时签到
-- Linux 服务器直接用 Python 运行
-- Windows 本地直接运行
-- Telegram 消息推送
+一般参数的优先级为：非空 Action 输入或 `INPUT_*` 环境变量 → 本地配置 → 默认配置。`--host` 高于其他站点配置；`--browser` 切换为本机浏览器会话模式。
 
-## 改造基础
+| 参数 | 含义 | 默认或约束 |
+| --- | --- | --- |
+| `email` | 登录邮箱 | 自动登录必填 |
+| `passwd` | 登录密码 | 自动登录必填 |
+| `secret` | 验证器 TOTP 长期密钥 | 云端验证器二步验证使用 |
+| `code` | 一次性邮箱或设备验证码 | 仅适合临时手动运行 |
+| `verify_method` | 二步验证方式 | `ga`、`email`、`auto` 或留空；当前工作流用 `ga` |
+| `host` | 站点域名，可用逗号分隔 | 不带协议头；当前工作流覆盖为 `cordcloud.biz` |
+| `trust_device` | 是否信任当前设备 | 默认 `false` |
+| `insecure_skip_verify` | 是否跳过 TLS 验证 | 默认 `false`，仅供明确的临时调试 |
+| `telegram_bot_token` | Telegram Bot Token | 与 `telegram_chat_id` 同时配置才启用通知 |
+| `telegram_chat_id` | Telegram 会话 ID | 可选 |
+| `device_fingerprint` | 本地配置中的设备指纹 | 由程序维护；Cap 登录采用当次浏览器生成的值 |
 
-本仓库基于原始项目 [yanglbme/cordcloud-action](https://github.com/yanglbme/cordcloud-action) 改造。
+默认站点列表为 `cordcloud.us,cordcloud.one,cordcloud.biz,c-cloud.xyz`，不代表这些域名都已在本轮验证。建议使用已实测的 `cordcloud.biz`。
 
-本次改造的背景是 2026-03-23 实测发现 CordCloud 登录流程已不再兼容原版实现，站点新增了：
+多站点模式在可重试错误后尝试下一个域名；账号认证错误会停止。当前单站点工作流没有自动重试。
 
-- `csrf_token`
-- `ALTCHA`
-- `device_fingerprint`
-- 新版“陌生设备二步验证”接口 `/auth/login/2fa/verify`
+## 登录流程与诊断
 
-因此当前仓库是在原版基础上，针对新版网页登录流程做的兼容修复。
+Cap 登录按以下顺序执行：
 
-## 当前支持的登录方式
+1. 创建全新的临时 Chrome 配置，由网站组件完成验证。
+2. 在页面主执行环境读取 Cap 令牌、CSRF、设备指纹和 UA，并取得本站 Cookie。
+3. 关闭浏览器并删除临时配置，将会话数据在内存中交给登录请求。
+4. 完成账号登录及所需的二步验证，再调用签到接口。
 
-当前代码支持以下两类二步验证：
+浏览器启动使用 [Patchright Python](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright-python)，版本由 [requirements.txt](requirements.txt) 固定。旧 ALTCHA 页面仍保留原有处理路径。
 
-- `secret`
-  说明：验证器 APP 的长期密钥，程序可自行生成动态验证码
-  适用：GitHub Actions、服务器定时任务、Windows 本地长期使用
-- `code`
-  说明：邮件验证码或设备验证码，一次性 6 位码
-  适用：本地临时测试
-- `verify_method`
-  说明：显式指定二步验证方式，可选 `ga`、`email` 或留空自动选择
-  适用：账号同时启用了验证器和邮箱验证时，强制选择其中一种
+| 日志 | 说明 |
+| --- | --- |
+| `Cap diagnostic` | 验证阶段、耗时、Chrome 版本、登录页状态、必要字段是否就绪 |
+| `event=cap_http` | 页面实际验证 API 的 `challenge` / `redeem` HTTP 状态 |
+| `Cap session` | 浏览器会话导入状态、提交登录请求的 HTTP 状态 |
+| `redacted_unknown` | 错误内容未匹配允许输出的公开原因码，已隐藏原文 |
 
-注意：
+Patchright 不提供控制台事件，诊断使用网络响应及字段状态。上述诊断不输出令牌、Cookie、账号、设备指纹值、响应正文或浏览器异常原文。HTTP 200 或取得 Cap 令牌本身不等于登录或签到成功。
 
-- 如果同时提供 `secret` 和 `code`，可通过 `verify_method` 明确指定使用哪一种
-- 如果未设置 `verify_method`，程序会优先使用 `secret + ga`
-- 如果你想避免站点先打开邮箱验证码页，建议在使用 `secret` 时显式设置 `verify_method=ga`
-- 如果站点启用了“陌生设备验证”，而你又没有 `secret`，则自动化定时签到通常不可持续，只能临时手动输入 `code`
+### 常见问题
 
-## 参数说明
+- **`automated_browser` 或验证接口拒绝：**站点检测未通过。检查实际运行提交是否已采用新流程，再结合验证阶段和 HTTP 状态定位；不要将失败当作已签到。
+- **浏览器启动失败：**检查 Google Chrome 是否安装。无桌面 Linux 应通过 `xvfb-run -a` 启动，并安装 `xvfb`、`xauth`。
+- **二步验证失败：**核对 `CC_SECRET` 是否为长期 TOTP 密钥，而非六位动态码；当前工作流强制使用 `ga`。
+- **缺少账号参数：**核对 Secrets 名称，尤其是 `CC_EMAIL`、`CC_PASSWD`；本地则检查 `config.local.json`。
+- **显示已经签到：**程序将站点的“您似乎已经签到过”视为当日已完成，不会再次增加流量。
+- **只有 Telegram 警告：**检查机器人和会话配置；签到与通知分别判断结果。
 
-| 参数 | 说明 | 是否必填 | 示例 |
-| --- | --- | --- | --- |
-| `email` | CordCloud 登录邮箱 | 是 | `your@email.com` |
-| `passwd` | CordCloud 登录密码 | 是 | `your-password` |
-| `secret` | 验证器 APP 的 TOTP 密钥 | 否 | `JBSWY3DPEHPK3PXP` |
-| `code` | 邮件/设备二步验证码 | 否 | `123456` |
-| `verify_method` | 指定 2FA 方式：`ga` / `email` / 留空自动 | 否 | `ga` |
-| `host` | 站点域名，支持多个逗号分隔 | 否 | `cordcloud.one` |
-| `trust_device` | 2FA 成功后是否信任当前设备 | 否 | `false` |
-| `insecure_skip_verify` | 是否跳过 TLS 证书校验，仅调试用 | 否 | `false` |
-| `telegram_bot_token` | Telegram 机器人 Token | 否 | `123456:ABC-DEF...` |
-| `telegram_chat_id` | Telegram 会话 Chat ID | 否 | `123456789` |
+## Docker Action 与维护
 
-默认 `host`：
+仓库仍提供 [action.yml](action.yml) 和 [Dockerfile](Dockerfile) 形式的 Docker Action。镜像安装 Chrome、Xvfb、xauth，并用 tini 管理启动进程；当前每日工作流直接运行 Python，不需要构建镜像。
 
-```text
-cordcloud.us,cordcloud.one,cordcloud.biz,c-cloud.xyz
-```
-
-## 各参数如何获取
-
-### 1. `email`
-
-就是你的 CordCloud 登录邮箱。
-
-### 2. `passwd`
-
-就是你的 CordCloud 登录密码。
-
-### 3. `secret`
-
-`secret` 不是 6 位动态验证码，而是验证器绑定时生成的“长期密钥”。
-
-常见获取方式：
-
-1. 登录 CordCloud 后台
-2. 进入账号安全 / 两步验证 / 验证器设置页面
-3. 找到验证器 APP 绑定信息
-4. 页面通常会显示二维码，或一条 `otpauth://...` 链接
-5. 从中提取 `secret=...` 后面的值
-
-例如：
-
-```text
-otpauth://totp/CordCloud:xxx?secret=JBSWY3DPEHPK3PXP&issuer=CordCloud
-```
-
-真正要填的是：
-
-```text
-JBSWY3DPEHPK3PXP
-```
-
-不是整条 `otpauth://...`，只要 `secret=` 后面的那一段。
-
-### 4. `code`
-
-`code` 是你当前这一次登录收到的 6 位验证码，可能来自：
-
-- 邮箱验证码
-- 设备验证验证码
-
-这个值是一次性的，会过期，不适合放到 GitHub Actions 做长期定时任务。
-
-### 5. `verify_method`
-
-可选值：
-
-- `ga`：强制使用验证器 APP
-- `email`：强制使用邮箱验证码
-- 留空：自动选择
-
-推荐：
-
-- 你已经配置了 `secret`，并且账号同时支持邮箱验证和验证器验证时，设置为 `ga`
-- 你只拿到了当次邮件验证码时，设置为 `email`
-
-### 6. `host`
-
-就是你实际登录使用的站点域名，不要带协议头。
-
-正确示例：
-
-```text
-cordcloud.one
-```
-
-错误示例：
-
-```text
-https://cordcloud.one
-```
-
-如果你不确定，可以直接保留默认值，让程序自动依次尝试。
-
-### 7. `telegram_bot_token`
-
-这是 Telegram 机器人的 Token。
-
-获取方式：
-
-1. 在 Telegram 里打开 `@BotFather`
-2. 发送 `/newbot`
-3. 按提示创建机器人
-4. 复制返回的 Bot Token
-
-### 8. `telegram_chat_id`
-
-这是 Telegram 接收消息的会话 ID。
-
-常见获取方式：
-
-1. 先给你的机器人发一条消息
-2. 打开：
-
-```text
-https://api.telegram.org/bot<你的BotToken>/getUpdates
-```
-
-3. 在返回结果里找到 `chat.id`
-
-说明：
-
-- 私聊通常是正整数
-- 群组通常是负数
-- 如果你把机器人拉进群里，记得先给群里发一条消息，再查 `getUpdates`
-
-## 配置文件
-
-项目根目录提供了默认模板 [config.default.json](./config.default.json)。
-
-本地使用时，建议复制一份为 `config.local.json`，该文件已加入 `.gitignore`，不会提交到仓库。
-
-示例：
-
-```json
-{
-  "email": "your@email.com",
-  "passwd": "your-password",
-  "secret": "JBSWY3DPEHPK3PXP",
-  "code": "",
-  "verify_method": "ga",
-  "host": "cordcloud.one",
-  "trust_device": "false",
-  "insecure_skip_verify": "false",
-  "telegram_bot_token": "",
-  "telegram_chat_id": ""
-}
-```
-
-如果你当前没有验证器密钥，只想临时本地测试：
-
-```json
-{
-  "email": "your@email.com",
-  "passwd": "your-password",
-  "secret": "",
-  "code": "123456",
-  "verify_method": "email",
-  "host": "cordcloud.one",
-  "trust_device": "false",
-  "insecure_skip_verify": "false",
-  "telegram_bot_token": "",
-  "telegram_chat_id": ""
-}
-```
-
-参数读取优先级：
-
-1. Action 输入 / 环境变量 `INPUT_*`
-2. `config.local.json`
-3. `config.default.json`
-
-## GitHub Actions 使用方法
-
-### 推荐方式
-
-推荐只在 GitHub Actions 中使用 `secret`，不要依赖 `code`。
-
-原因：
-
-- `secret` 可以长期稳定自动生成动态验证码
-- `code` 是临时验证码，过期后就失效，不适合定时任务
-- 如果账号同时支持邮箱和验证器，建议显式设置 `verify_method: ga`
-- `trust_device` 默认应保持 `false`
-- `insecure_skip_verify` 默认应保持 `false`
-
-### 先配置 GitHub Secrets
-
-在你的 GitHub 仓库中配置：
-
-- `CC_EMAIL`
-- `CC_PASSWD`
-- `CC_SECRET`
-- `TG_BOT_TOKEN`（可选）
-- `TG_CHAT_ID`（可选）
-
-### Workflow 示例
-
-如果你已经把本项目推送到你自己的 GitHub 仓库，例如：
-
-```text
-yourname/cordcloud-action
-```
-
-则可以这样用：
-
-```yml
-name: CordCloud
-
-on:
-  schedule:
-    - cron: "0 0 * * *"
-  workflow_dispatch:
-
-jobs:
-  checkin:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: yourname/cordcloud-action@main
-        with:
-          email: ${{ secrets.CC_EMAIL }}
-          passwd: ${{ secrets.CC_PASSWD }}
-          secret: ${{ secrets.CC_SECRET }}
-          verify_method: ga
-          host: cordcloud.one
-          trust_device: false
-          telegram_bot_token: ${{ secrets.TG_BOT_TOKEN }}
-          telegram_chat_id: ${{ secrets.TG_CHAT_ID }}
-```
-
-如果你把 Action 代码和 workflow 放在同一个仓库里，也可以：
-
-```yml
-name: CordCloud
-
-on:
-  schedule:
-    - cron: "0 0 * * *"
-  workflow_dispatch:
-
-jobs:
-  checkin:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./
-        with:
-          email: ${{ secrets.CC_EMAIL }}
-          passwd: ${{ secrets.CC_PASSWD }}
-          secret: ${{ secrets.CC_SECRET }}
-          verify_method: ga
-          host: cordcloud.one
-          trust_device: false
-          telegram_bot_token: ${{ secrets.TG_BOT_TOKEN }}
-          telegram_chat_id: ${{ secrets.TG_CHAT_ID }}
-```
-
-注意：
-
-- `cron` 使用 UTC 时间
-- 如果你的账号只支持邮件验证码 `code`，则 GitHub Actions 不适合做真正的长期自动签到
-- 不建议在 GitHub Actions 中启用 `trust_device`
-- 不建议在 GitHub Actions 中启用 `insecure_skip_verify`
-
-## Linux 服务器 Python 使用方法
-
-### 1. 准备环境
+修改登录流程后，可先执行不访问真实账号的回归测试：
 
 ```bash
-git clone <your-repo-url>
-cd cordcloud-action
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python -m patchright install chrome
-# Linux 无桌面环境另需 xvfb、xauth，运行时使用 xvfb-run -a python main.py
+.venv/bin/python -m unittest -v test.py
 ```
 
-### 2. 配置 `config.local.json`
+当前验证证据：
 
-```bash
-cp config.default.json config.local.json
-```
+- [独立 Cap 探针](https://github.com/ANIIAN91/cordcloud-checkin/actions/runs/40795157310)：本机取得 1 次、云端取得 3 次令牌，未执行账号登录。
+- [完整云端签到](https://github.com/ANIIAN91/cordcloud-checkin/actions/runs/40796343093)：登录成功、获得 171 MB、通知成功，运行提交 `3642150`。
+- 本轮 21 项回归测试通过；Docker 构建及隔离容器中的模拟页面启动检查通过。Docker 模拟检查不等于再次真实签到。
 
-然后填写你的账号信息。
+站点规则、浏览器及托管 runner 环境可能变化，现有小样本不构成长期成功率保证。报告问题时可附工作流链接和脱敏后的错误阶段，不要附账号配置或完整浏览器会话。
 
-### 3. 运行
+## 来源与许可证
 
-```bash
-python main.py
-```
+本项目基于 [yanglbme/cordcloud-action](https://github.com/yanglbme/cordcloud-action) 改造，补充了当前站点的 CSRF、设备二步验证、Cap 登录及通知流程。
 
-### 4. 也可以直接用环境变量运行
-
-```bash
-export INPUT_EMAIL='your@email.com'
-export INPUT_PASSWD='your-password'
-export INPUT_SECRET='your-totp-secret'
-export INPUT_VERIFY_METHOD='ga'
-export INPUT_HOST='cordcloud.one'
-export INPUT_TELEGRAM_BOT_TOKEN='123456:ABC-DEF'
-export INPUT_TELEGRAM_CHAT_ID='123456789'
-python main.py
-```
-
-如果你只想临时测试邮件验证码：
-
-```bash
-export INPUT_EMAIL='your@email.com'
-export INPUT_PASSWD='your-password'
-export INPUT_CODE='123456'
-export INPUT_VERIFY_METHOD='email'
-export INPUT_HOST='cordcloud.one'
-export INPUT_TELEGRAM_BOT_TOKEN='123456:ABC-DEF'
-export INPUT_TELEGRAM_CHAT_ID='123456789'
-python main.py
-```
-
-### 5. 定时运行
-
-推荐在 Linux 服务器上配合 `crontab` 使用，并优先采用 `secret`。
-
-## Windows 使用方法
-
-### 方式一：直接使用本项目提供的本地脚本
-
-项目中已提供 [local_test.ps1](./local_test.ps1)。
-
-如果你已经配置好 `config.local.json`，直接运行：
-
-```powershell
-.\local_test.ps1
-```
-
-### 方式二：命令行传参
-
-使用验证器密钥：
-
-```powershell
-.\local_test.ps1 -Email '你的邮箱' -Passwd '你的密码' -SiteHost 'cordcloud.one' -Secret '你的TOTP密钥' -VerifyMethod 'ga' -TelegramBotToken '123456:ABC-DEF' -TelegramChatId '123456789'
-```
-
-使用一次性验证码：
-
-```powershell
-.\local_test.ps1 -Email '你的邮箱' -Passwd '你的密码' -SiteHost 'cordcloud.one' -Code '123456' -VerifyMethod 'email' -TelegramBotToken '123456:ABC-DEF' -TelegramChatId '123456789'
-```
-
-如果你明确要信任当前本地设备：
-
-```powershell
-.\local_test.ps1 -TrustDevice
-```
-
-### 方式三：自己创建 Python/Conda 环境
-
-```powershell
-conda create -n cordcloud python=3.10 -y
-conda activate cordcloud
-pip install -r requirements.txt
-python -m patchright install chrome
-copy config.default.json config.local.json
-python .\main.py
-```
-
-## 常见问题
-## 为什么原版项目现在不能用了
-
-因为 CordCloud 的登录链路已经变化，新增了：
-
-- `csrf_token`
-- `ALTCHA`
-- `device_fingerprint`
-- 新版二步验证接口
-
-原版项目仍按旧接口直接提交邮箱和密码，所以会失败。
-
-## 本地调试验证
-
-当前仓库已加入基础回归测试，可运行：
-
-```bash
-python -m unittest -v test.py
-```
-
-## 声明
-
-请不要把真实账号、密码、`secret`、邮件验证码直接提交到仓库。
-
-推荐做法：
-
-- GitHub Actions 用 `Secrets`
-- 本地调试用 `config.local.json`
-- `config.local.json` 不提交
-- `telegram_bot_token` 也应放在 `Secrets` 或本地配置里，不要写进公开仓库
+本仓库使用 [MIT License](LICENSE)。Patchright、Chrome 等依赖按各自许可证分发。
