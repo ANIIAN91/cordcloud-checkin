@@ -9,7 +9,7 @@ import requests
 
 from app.action import Action, AuthError, RetryableError
 from app.browser import BrowserError, load_session
-from app.headless import HeadlessError, prepare_login
+from app.headless import HeadlessError, prepare_login, _cap_diagnostic
 from app.config import get_or_create_device_fingerprint, load_config
 from app.notify import NotifyError, TelegramNotifier
 
@@ -62,6 +62,71 @@ def build_challenge(number=7, salt='salt?expires=9999999999&', algorithm='SHA-25
 
 
 class ActionTests(unittest.TestCase):
+    def test_cap_console_diagnostic_only_preserves_public_codes(self):
+        self.assertEqual(_cap_diagnostic(
+            '[Cap] [instr_blocked] Instrumentation blocked (automated_browser)'
+            ' cookie=session-secret token=cap-secret user@example.com\n::error::injected'
+        ), ('instr_blocked', 'automated_browser'))
+        for text in (
+            '[instr_blocked] Instrumentation blocked (secret_account_id)',
+            '[instr_blocked] Instrumentation blocked (user@example.com)',
+            '[instr_blocked] unexpected response token=secret',
+        ):
+            self.assertEqual(_cap_diagnostic(text), ('instr_blocked', 'redacted_unknown'))
+        self.assertEqual(_cap_diagnostic('[instr_timeout] Instrumentation timed out'),
+                         ('instr_timeout', 'instrumentation_timeout'))
+        self.assertIsNone(_cap_diagnostic('cookie=session-secret'))
+
+    def test_cap_blocked_diagnostics_are_sanitized_and_stop_login(self):
+        for reason in ('automated_browser', 'secret_account_id'):
+            with self.subTest(reason=reason), mock.patch('app.headless.log.info') as info, \
+                    mock.patch('playwright.sync_api.sync_playwright') as playwright:
+                browser = playwright.return_value.__enter__.return_value.chromium.launch.return_value
+                browser.version = '156.0.8078.4'
+                page = browser.new_context.return_value.new_page.return_value
+                page.url = 'https://cordcloud.biz/auth/login?token=url-secret'
+
+                def navigate(*args, **kwargs):
+                    callback = page.on.call_args.args[1]
+                    message = mock.Mock(text=f'[instr_blocked] Instrumentation blocked ({reason}) '
+                                        'cookie=session-secret token=cap-secret\n::error::injected')
+                    callback(message)
+                    callback(message)  # Repeated console events do not flood the log.
+                    return mock.Mock(status=200)
+
+                page.goto.side_effect = navigate
+                with self.assertRaises(HeadlessError) as error:
+                    prepare_login(page.url)
+                output = '\n'.join(call.args[0] for call in info.call_args_list) + str(error.exception)
+                self.assertIn('code=instr_blocked', output)
+                self.assertIn('reason=' + ('automated_browser' if reason == 'automated_browser'
+                                         else 'redacted_unknown'), output)
+                self.assertEqual(output.count('event=widget_error'), 1)
+                for secret in ('secret_account_id', 'session-secret', 'cap-secret', 'url-secret', '::error::'):
+                    self.assertNotIn(secret, output)
+                page.evaluate.assert_not_called()
+                browser.close.assert_called_once()
+
+    def test_cap_timeout_and_browser_errors_log_stage_without_raw_exception(self):
+        from playwright.sync_api import Error
+        for failure in ('timeout', 'browser_error'):
+            with self.subTest(failure=failure), mock.patch('app.headless.log.info') as info, \
+                    mock.patch('playwright.sync_api.sync_playwright') as playwright:
+                browser = playwright.return_value.__enter__.return_value.chromium.launch.return_value
+                page = browser.new_context.return_value.new_page.return_value
+                page.url = 'https://cordcloud.biz/auth/login'
+                page.goto.return_value.status = 200
+                if failure == 'browser_error':
+                    page.goto.side_effect = Error('https://example.com/?token=exception-secret')
+                with self.assertRaises(HeadlessError):
+                    prepare_login(page.url, timeout=0)
+                output = '\n'.join(call.args[0] for call in info.call_args_list)
+                self.assertIn('stage=wait_cap' if failure == 'timeout' else 'stage=load_login_page', output)
+                self.assertIn('reason=cap_wait_timeout' if failure == 'timeout'
+                              else 'reason=playwright_error', output)
+                self.assertNotIn('exception-secret', output)
+                browser.close.assert_called_once()
+
     def test_cap_failure_does_not_submit_password(self):
         session = FakeSession({
             ('GET', 'https://cordcloud.biz/auth/login'): [
@@ -114,12 +179,20 @@ class ActionTests(unittest.TestCase):
             page = context.new_page.return_value
             page.url = 'https://cordcloud.biz/auth/login'
             page.goto.return_value.status = 200
-            ready = {'cap_token': 'cap', 'csrf_token': 'csrf', 'device_fingerprint': 'fp',
+            ready = {'cap_token': 'cap-secret-value', 'csrf_token': 'csrf-secret-value',
+                     'device_fingerprint': 'fingerprint-secret-value',
                      'user_agent': 'Chromium UA'}
             page.evaluate.side_effect = [{}, ready]
-            context.cookies.return_value = [{'name': 'session', 'value': 'test'}]
-            with mock.patch('app.headless.time.sleep'):
+            context.cookies.return_value = [{'name': 'session', 'value': 'cookie-secret-value'}]
+            with mock.patch('app.headless.time.sleep'), mock.patch('app.headless.log.info') as info:
                 data, cookies = prepare_login(page.url)
+            output = '\n'.join(call.args[0] for call in info.call_args_list)
+            self.assertIn('cap_token_present=false', output)
+            self.assertIn('cap_token_present=true', output)
+            self.assertIn('stage=collect_session event=ready', output)
+            self.assertNotIn('Chromium UA', output)
+            for secret in (*ready.values(), 'cookie-secret-value'):
+                self.assertNotIn(secret, output)
             self.assertEqual(data, ready)
             self.assertEqual(cookies[0]['name'], 'session')
             page.wait_for_function.assert_not_called()

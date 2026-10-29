@@ -34,6 +34,22 @@ Windows 使用 `python -m playwright install --no-shell chromium`。
 CI 安装依据 [Playwright 官方 CI 文档](https://playwright.dev/python/docs/ci#github-actions)。
 站点验证流程仍可能变化；验证失败或超时会报告失败，不视为已签到。
 
+### Cap 验证诊断日志
+
+默认输出 `Cap diagnostic` 日志，包含启动浏览器、加载登录页、等待 Cap、
+读取会话各阶段及从本次验证开始计算的耗时；同时记录 Chromium 版本、登录页
+HTTP 状态和 `cap_token` / `csrf_token` / `device_fingerprint` 是否就绪（仅布尔值）。
+字段状态仅在变化时输出，重复的同类验证错误只记录一次。
+
+页面控制台的 `[instr_blocked]` 和 `[instr_timeout]` 保留原始错误码。
+目前仅允许输出已核实的公开拒绝原因 `automated_browser`；未识别的原因或格式
+显示为 `redacted_unknown`，不再一律推断为 `automated_browser`。
+这不是完整控制台转储：不输出任意原始消息、URL、请求或响应正文、账号、Cookie、
+令牌、指纹值或浏览器异常原文。诊断失败记录阶段和固定分类，不能据此确定服务器内部风控规则。
+
+这些日志不增加重试、不改变验证和签到结果；代码发布到 GitHub 后，下一次工作流
+才会使用新日志。单元测试使用模拟浏览器，不代表真实网站或 GitHub 运行必然通过。
+
 ### 可选：复用已登录的桌面浏览器
 
 保持 `agent-browser-cli` 扩展连接，并打开已登录的 `https://cordcloud.biz/user`：
