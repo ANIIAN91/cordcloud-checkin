@@ -1,54 +1,55 @@
 # CordCloud Action
 
-## 无人值守签到（2026-10-23 验证）
+## 无人值守签到
 
-默认运行会检测登录页的验证方式：旧页面使用 ALTCHA；新版 Cap 页面会启动一个
-全新的无头 Chromium，完成网页原有验证，再用该会话提交账号密码和 TOTP 二步验证码。
-不依赖已登录的桌面浏览器、浏览器扩展或人工输入验证码，不保存登录 Cookie。
-无人值守运行需配置 `email`、`passwd`、`secret`，建议 `verify_method=ga`。
+默认运行会检测登录页的验证方式：旧页面使用 ALTCHA；新版 Cap 页面使用
+Patchright 1.64.3 + Google Chrome 有界面模式，Linux 云端通过 Xvfb 提供虚拟显示。
+每次使用全新临时浏览器配置，取得验证字段及 Cookie 后关闭浏览器并删除临时配置。
+随后在内存中把该会话的 Cookie、UA、Cap 令牌、CSRF 和设备指纹交给登录请求，
+完成账号密码登录、TOTP 二步验证和签到。不依赖已登录的个人浏览器或手动验证码。
 
-本机环境已配置，可直接运行：
+需配置 `email`、`passwd`、`secret`，建议 `verify_method=ga`。
 
-```bash
-.venv/bin/python main.py --host cordcloud.biz
-```
-
-其他 Linux 机器先在虚拟环境中安装依赖和浏览器：
+安装项目依赖和 Google Chrome（已安装 Chrome 时无需重复安装）：
 
 ```bash
 pip install -r requirements.txt
-python -m playwright install --with-deps --no-shell chromium
-python main.py --host cordcloud.biz
+python -m patchright install chrome
 ```
 
-`--with-deps` 在 Linux 上安装浏览器系统依赖，可能需要 sudo。
-Windows 使用 `python -m playwright install --no-shell chromium`。
-项目旧 `.conda/cordcloud-test` 是 Windows 环境，不能直接用于 Linux。
+Linux 无桌面环境还需安装 `xvfb` 和 `xauth`，然后运行：
 
-项目工作流会安装 Python 3.12、项目依赖和 Chromium，执行回归测试后运行 `python main.py`。
-原有定时为 UTC 02:20（北京时间 10:20），另有 0～10 分钟随机延迟；手动触发跳过随机延迟。
-若 GitHub 显示 `disabled_inactivity`，需重新启用工作流；上传代码本身不等于云端运行验证通过。
-本次本机实测：全新无头会话登录及二步验证成功，签到返回“您似乎已经签到过了”。
+```bash
+xvfb-run -a python main.py --host cordcloud.biz
+```
 
-浏览器安装方式依据 [Playwright 官方浏览器文档](https://playwright.dev/python/docs/browsers#chromium-new-headless-mode)，
-CI 安装依据 [Playwright 官方 CI 文档](https://playwright.dev/python/docs/ci#github-actions)。
-站点验证流程仍可能变化；验证失败或超时会报告失败，不视为已签到。
+有桌面显示的本机和 Windows 可直接运行 `python main.py --host cordcloud.biz`。
+Chrome 安装可能需要管理员权限。项目旧 `.conda/cordcloud-test` 是 Windows 环境，不能直接用于 Linux。
+原有本机 `.venv` 需要更新依赖后才能运行新版本；独立探针环境不自动替代它。
+
+GitHub 工作流使用 Ubuntu 24.04、Python 3.12 和托管 runner 已有的 Google Chrome/Xvfb，
+先执行回归测试，再执行完整签到。Docker Action 同样安装 Chrome/Xvfb 并通过虚拟显示运行。
+定时为 UTC 02:20（北京时间 10:20），另有 0～10 分钟随机延迟；手动触发跳过随机延迟。
+若 GitHub 显示 `disabled_inactivity`，需重新启用工作流；上传代码本身不等于云端验证通过。
+
+配置依据：[Patchright Python 官方说明](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright-python)。
+此前独立探针已在本机取得 1 次、云端取得 3 次 Cap 令牌，
+[探针运行记录](https://github.com/ANIIAN91/cordcloud-checkin/actions/runs/40795157310)仅证明该阶段通过；
+完整登录、二步验证和签到结果以对应 Actions 日志为准。站点验证流程仍可能变化。
 
 ### Cap 验证诊断日志
 
-默认输出 `Cap diagnostic` 日志，包含启动浏览器、加载登录页、等待 Cap、
-读取会话各阶段及从本次验证开始计算的耗时；同时记录 Chromium 版本、登录页
-HTTP 状态和 `cap_token` / `csrf_token` / `device_fingerprint` 是否就绪（仅布尔值）。
-字段状态仅在变化时输出，重复的同类验证错误只记录一次。
+`Cap diagnostic` 记录浏览器启动、登录页加载、等待验证、读取会话各阶段及总耗时，
+包括 Chrome 版本、登录页 HTTP 状态和必要字段是否就绪（仅布尔值）。
+浏览器在主执行环境读取组件属性及页面变量，字段值只在内存传递，不进入日志。
 
-页面控制台的 `[instr_blocked]` 和 `[instr_timeout]` 保留原始错误码。
-目前仅允许输出已核实的公开拒绝原因 `automated_browser`；未识别的原因或格式
-显示为 `redacted_unknown`，不再一律推断为 `automated_browser`。
-这不是完整控制台转储：不输出任意原始消息、URL、请求或响应正文、账号、Cookie、
-令牌、指纹值或浏览器异常原文。诊断失败记录阶段和固定分类，不能据此确定服务器内部风控规则。
+Patchright 不提供控制台事件，诊断改为匹配页面组件声明的验证 API，记录
+`challenge` / `redeem` 的 HTTP 状态。错误响应仅保留已知公开错误码，未知内容显示
+`redacted_unknown`；不再仅凭失败就推断为 `automated_browser`。
+`Cap session` 记录会话已导入和登录请求的 HTTP 状态，HTTP 200 本身不代表登录成功。
 
-这些日志不增加重试、不改变验证和签到结果；代码发布到 GitHub 后，下一次工作流
-才会使用新日志。单元测试使用模拟浏览器，不代表真实网站或 GitHub 运行必然通过。
+这些诊断不输出响应正文、URL、账号、Cookie、令牌、指纹值或浏览器异常原文。
+失败、异常跳转、字段缺失及超时仍会报告失败，不添加自动重试，不视为已签到。
 
 ### 可选：复用已登录的桌面浏览器
 
@@ -59,7 +60,7 @@ HTTP 状态和 `cap_token` / `csrf_token` / `device_fingerprint` 是否就绪（
 ```
 
 `--browser` 使用浏览器当前账号，不用配置文件的邮箱密码登录；仅在内存中复用指定站点的
-Cookie。会话过期后需重新登录。GitHub Actions 使用上面的默认无头模式。
+Cookie。会话过期后需重新登录。GitHub Actions 使用上面的 Patchright + Chrome + Xvfb 流程。
 `--host` 优先于配置文件和环境变量。
 
 <a href="./LICENSE"><img src="https://img.shields.io/github/license/yanglbme/cordcloud-action?color=42b883&style=flat-square" alt="license"></a>
@@ -382,7 +383,8 @@ cd cordcloud-action
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-python -m playwright install --with-deps --no-shell chromium
+python -m patchright install chrome
+# Linux 无桌面环境另需 xvfb、xauth，运行时使用 xvfb-run -a python main.py
 ```
 
 ### 2. 配置 `config.local.json`
@@ -467,7 +469,7 @@ python main.py
 conda create -n cordcloud python=3.10 -y
 conda activate cordcloud
 pip install -r requirements.txt
-python -m playwright install --no-shell chromium
+python -m patchright install chrome
 copy config.default.json config.local.json
 python .\main.py
 ```

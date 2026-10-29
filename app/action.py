@@ -9,6 +9,8 @@ from urllib.parse import parse_qs, urljoin, urlparse
 import requests
 from requests import exceptions as request_exceptions
 
+from app import log
+
 try:
     import pyotp
 except ImportError:  # pragma: no cover - runtime dependency is installed in the action image
@@ -346,18 +348,26 @@ class Action:
                 data, cookies = prepare_login(self.format_url('auth/login'), verify_tls=self.verify_tls)
             except HeadlessError as exc:
                 raise RetryableError(str(exc)) from exc
+            fields = ('cap_token', 'csrf_token', 'device_fingerprint', 'user_agent')
+            if not all(isinstance(data.get(key), str) and data[key] for key in fields):
+                raise RetryableError('浏览器登录会话字段不完整，停止提交账号密码')
             # Submit the token with the browser's own session, UA and fingerprint.
             self.session.cookies.clear()
             for cookie in cookies:
+                expiry = cookie.get('expires', -1)
                 self.session.cookies.set(
                     cookie['name'], cookie['value'], domain=cookie['domain'],
                     path=cookie.get('path', '/'), secure=cookie.get('secure', True),
+                    expires=int(expiry) if expiry > 0 else None,
+                    rest={'HttpOnly': cookie.get('httpOnly', False)},
                 )
             self.session.headers['User-Agent'] = data['user_agent']
             overrides.update({key: data[key] for key in (
                 'cap_token', 'csrf_token', 'device_fingerprint',
             )})
+            log.info('Cap session stage=import_session event=ready')
             response = self._post('auth/login', overrides, referer=login_page.url)
+            log.info(f'Cap session stage=submit_login http_status={response.status_code}')
             result = self._decode_json(response, '登录')
         else:
             result = self._submit_form(login_page, login_page.text, overrides=overrides)

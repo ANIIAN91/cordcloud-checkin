@@ -2,6 +2,7 @@
 .gitignore
 .conda
 .venv
+.work
 __pycache__
 *.pyc
 *.pyo
