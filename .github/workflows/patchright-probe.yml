@@ -1,0 +1,44 @@
+name: Patchright Cap probe
+
+on:
+  push:
+    branches: [diagnostics/patchright-probe]
+    paths:
+      - diagnostics/patchright_probe.py
+      - diagnostics/patchright-requirements.txt
+      - .github/workflows/patchright-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: patchright-cap-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install isolated probe dependency
+        run: python -m pip install -r diagnostics/patchright-requirements.txt
+      - name: Check hosted browser and display
+        run: |
+          google-chrome --version
+          command -v xvfb-run
+      - name: Probe three fresh sessions without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            echo "::group::Fresh Cap session ${attempt}"
+            xvfb-run -a python -u diagnostics/patchright_probe.py
+            echo "::endgroup::"
+          done
